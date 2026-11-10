@@ -69,6 +69,138 @@ def patch_english(source):
     return patch_layout(source)
 
 
+# Gboard's standard English QWERTY long-press scheme, by key (card request 2026-11-09). Values are
+# the literal text a QML double-quoted string needs to contain for that symbol, not always the
+# symbol's own character: backslash and the double quote are themselves QML string escapes, so W's
+# value is the two-character escaped-backslash form (\\) and X's is the escaped-quote form (\").
+GBOARD_SYMBOL_HINTS = {
+    'Q': '%', 'W': '\\\\', 'E': '|', 'R': '=', 'T': '[', 'Y': ']', 'U': '<', 'I': '>', 'O': '{', 'P': '}',
+    'A': '@', 'S': '#', 'D': '$', 'F': '_', 'G': '&', 'H': '-', 'J': '+', 'K': '(', 'L': ')',
+    'Z': '*', 'X': '\\"', 'C': ':', 'V': ';', 'B': "'", 'N': '!', 'M': '?',
+}
+# Trimmed from the originally requested 16 (card 2026-11-09): Qt Virtual Keyboard's long-press
+# popup is a single-row horizontal strip with no wrap/grid mode, and the full 16-symbol list ran
+# off both edges of the screen on this device. Dropped: "," (already its own dedicated key next to
+# period), "% + & #" (more math/programming-leaning), and "@" (an 11-item row still clipped its
+# first entry against the screen edge). The period's own character is deliberately not in the list
+# (a plain tap still types it regardless of this list; only a stationary long-press-release, an
+# existing Qt quirk on every key, would land on the list's first entry instead).
+PERIOD_SYMBOLS = '\\"-:\';/()!?'
+
+
+def _find_key_block(source, letter, start_at=0):
+    """Byte range (start, end) of the next Key { ... } block for Qt.Key_<letter>, or None.
+    Brace counting skips quoted-string contents: O and P's own Gboard symbols are "{" and "}", and
+    a value like alternativeKeys: "{..." must never be mistaken for real QML structure."""
+    pos = start_at
+    while True:
+        match = re.search(r'\bKey\s*\{', source[pos:])
+        if not match:
+            return None
+        start = pos + match.start()
+        depth, end, in_string, escape = 1, None, False, False
+        index = pos + match.end()
+        while index < len(source):
+            char = source[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == '\\':
+                    escape = True
+                elif char == '"':
+                    in_string = False
+            elif char == '"':
+                in_string = True
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    end = index + 1
+                    break
+            index += 1
+        if end is None:
+            return None
+        if re.search(rf'\bkey\s*:\s*Qt\.Key_{letter}\b', source[start:end]):
+            return start, end
+        pos = end
+
+
+def _line_indent(block, pos):
+    """Leading whitespace of the line containing offset pos, or a plain 4-space fallback when
+    other content shares that line (e.g. a semicolon-separated one-line Key block)."""
+    line_start = block.rfind('\n', 0, pos) + 1
+    candidate = block[line_start:pos]
+    return candidate if candidate.strip() == '' else '    '
+
+
+def add_symbol_hints(source, hints=GBOARD_SYMBOL_HINTS):
+    """Give every target letter a Gboard-style symbol (card request 2026-11-09): prepended as the
+    first long-press option ahead of its existing accents/digits, and shown in the key's permanent
+    top-right hint — for q-p, appended after the digit already shown there (same corner, same
+    append-don't-replace trick the stock period key already uses for "!?"), so both stay visible
+    without needing a second hint property Qt's Key component has no slot for. English layouts only
+    — the scheme is a QWERTY hand-position convention, not meaningful on AZERTY/QWERTZ physical
+    layouts. Silently leaves a letter untouched if its Key block cannot be found (never invents
+    one), matching this module's existing fail-closed-but-never-guess style."""
+    for letter, symbol in hints.items():
+        found = _find_key_block(source, letter)
+        if not found:
+            continue
+        start, end = found
+        block = source[start:end]
+
+        existing_alt = re.search(r'alternativeKeys\s*:\s*"((?:\\.|[^"\\])*)"', block)
+        if existing_alt:
+            block = block[:existing_alt.start(1)] + symbol + block[existing_alt.start(1):]
+            alt_end = existing_alt.end() + len(symbol)
+        else:
+            text_match = re.search(r'text\s*:\s*"(?:\\.|[^"\\])*"', block)
+            if not text_match:
+                continue
+            indent = _line_indent(block, text_match.start())
+            insertion = f'\n{indent}alternativeKeys: "{symbol}{letter.lower()}"'
+            block = block[:text_match.end()] + insertion + block[text_match.end():]
+            alt_end = text_match.end() + len(insertion)
+
+        existing_small = re.search(r'smallText\s*:\s*"((?:\\.|[^"\\])*)"', block)
+        if existing_small:
+            # WHY append with a gap, not replace (card 2026-11-09): q-p's existing digit stays
+            # visible too, in the same corner slot, the same way the period key already shows "!?"
+            # together — avoids needing a second hint property/corner, which Qt's Key component has
+            # no slot for. The style's Label is right-anchored as one block (style.qml, Breeze), so
+            # padding before the symbol pushes the digit visually toward the key's left while the
+            # symbol stays pinned at the actual top-right corner — a cheap stand-in for two corners.
+            block = block[:existing_small.end(1)] + '     ' + symbol + block[existing_small.end(1):]
+        else:
+            indent = _line_indent(block, alt_end)
+            block = block[:alt_end] + f'\n{indent}smallText: "{symbol}"' + block[alt_end:]
+        if 'smallTextVisible' not in block:
+            small_match = re.search(r'smallText\s*:\s*"(?:\\.|[^"\\])*"', block)
+            indent = _line_indent(block, small_match.start())
+            block = (block[:small_match.end()] + f'\n{indent}smallTextVisible: true' +
+                    block[small_match.end():])
+
+        source = source[:start] + block + source[end:]
+    return source
+
+
+def add_period_symbols(source, symbols=PERIOD_SYMBOLS):
+    """Replace the period key's "!.?" long-press list with the full requested set (card
+    2026-11-09). A full replace, not a prepend: the caller specified the exact complete list and
+    order they want, unlike the per-letter hints above which keep each locale's existing accents."""
+    found = _find_key_block(source, 'Period')
+    if not found:
+        return source
+    start, end = found
+    block = source[start:end]
+    existing = re.search(r'alternativeKeys\s*:\s*"((?:\\.|[^"\\])*)"', block)
+    if not existing:
+        return source
+    block = block[:existing.start(1)] + symbols + block[existing.end(1):]
+    return source[:start] + block + source[end:]
+
+
 def prepare_overrides(stock):
     """Read-only preflight shared by setup and staging; no fabricated absent locale directories."""
     stock = Path(stock)
@@ -88,7 +220,11 @@ def prepare_overrides(stock):
                 raise ValueError(f'Unsupported {folder.name} fallback; refusing to guess which layout to change.')
             main = stock / 'fallback/main.qml'
         try:
-            overrides[folder.name] = patch_layout(main.read_text())
+            patched = patch_layout(main.read_text())
+            if folder.name.startswith('en'):
+                patched = add_symbol_hints(patched)
+                patched = add_period_symbols(patched)
+            overrides[folder.name] = patched
         except (OSError, ValueError) as error:
             raise ValueError(f'{folder.name}: {error}') from error
     return overrides
