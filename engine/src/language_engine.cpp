@@ -1104,6 +1104,13 @@ int LanguageEngine::frequency(const std::string &word) const
 void LanguageEngine::setCapitals(std::shared_ptr<const Capitals> capitals)
 {
     if (!d_->ok || d_->keepCase) return;
+    // WHY (device perf fix, 2026-11-09): capitalsFor() (languagetextrules.h) already caches one Capitals
+    // instance per language, so an unchanged language hands back the exact same pointer here. Without this
+    // guard, every call re-derived the display form of every dictionary entry (~250k words for English) from
+    // scratch — and resolveCurrentProfile()'s syncLearnedWords(true) calls this on every profile resolve,
+    // including a reused-engine return trip from the symbols/numbers page. That synchronous full-dictionary
+    // pass, not the dictionary parse itself, was the real cause of the multi-second freeze on this device.
+    if (capitals == d_->capitals) return;
     d_->capitals = std::move(capitals);
     // WHY every word again: entries keep the form they are shown in, and the swipe word list is rebuilt from them.
     for (auto &e : d_->entries) e.text = d_->displayForm(QString::fromStdString(e.text)).toStdString();

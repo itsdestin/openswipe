@@ -13,6 +13,8 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QResource>
+#include <map>
+#include <mutex>
 
 static void initLanguageAssets() { Q_INIT_RESOURCE(language_assets); }
 namespace swipekb {
@@ -44,11 +46,31 @@ static QString localPath(const QString &root, const QString &relative)
 }
 static QString digest(const QString &path)
 {
+    // WHY (device perf fix, 2026-11-09): resolveProfile() re-verifies every asset's checksum on every call,
+    // including a profile resolve that only toggles the symbols/numbers input mode and changes no file on disk.
+    // Re-hashing several MB of next-word/swipe-model files synchronously on the UI thread, every time, was a
+    // real chunk of this device's freeze. Cached by (size, mtime), same mutex+map pattern as capitalsFor()
+    // above: a changed file (different size or mtime) still gets rehashed, so tampering/corruption detection
+    // is unaffected.
+    static std::mutex lock;
+    struct Cached { qint64 size; qint64 mtime; QString hash; };
+    static std::map<QString, Cached> cache;
+    const QFileInfo info(path);
+    if (!info.isFile()) return {};
+    const qint64 size=info.size(), mtime=info.lastModified().toMSecsSinceEpoch();
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        const auto it=cache.find(path);
+        if (it!=cache.end() && it->second.size==size && it->second.mtime==mtime) return it->second.hash;
+    }
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);
     if (!hash.addData(&file)) return {};
-    return QString::fromLatin1(hash.result().toHex());
+    const QString result=QString::fromLatin1(hash.result().toHex());
+    std::lock_guard<std::mutex> guard(lock);
+    cache[path]={size,mtime,result};
+    return result;
 }
 static QJsonObject readObject(const QString &path)
 {

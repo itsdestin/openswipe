@@ -132,7 +132,6 @@ void SwipeInputMethod::resolveCurrentProfile()
     QPointer<SwipeInputMethod> self(this);
     reset();
     if (!self) return;
-    m_engine.reset();
     m_layoutKeys.clear(); // WHY: another layout's key positions would give a typed word a wrong made-up path
     m_predictionModelState=swipekb::PredictionModelState::NotRequested;
     emit profileChanged();
@@ -142,26 +141,39 @@ void SwipeInputMethod::resolveCurrentProfile()
     const QString root=swipekb::languageModelRoot(m_locale,SwipeRecorder::modelDir());
     auto snapshot=swipekb::resolveProfile(m_locale,m_layoutId,m_inputMode,root,epoch);
     if (snapshot.capabilities.swipe) {
-        swipekb::LanguageEngineSetup setup;
-        swipekb::configureLanguageEngine(snapshot,setup);
-        // WHY a fresh engine: never init() one already owned by a consumer/worker.
-        auto engine=std::make_shared<swipekb::LanguageEngine>();
-        if (engine->init(setup)) {
-            // Joint-model step 2: a swipe with words before is re-ranked with the sentence model the guess bar uses,
-            // borrowed from the next-word worker (no second copy in memory; see NextWordWorker::scoreForSwipe).
-            // WHY the same files and checksums as a next-word job (applyNeuralNextWord): the worker's model is used
-            // only when it is exactly this profile's; without a verified neural file this stays off.
-            const auto model=snapshot.assets.value(QStringLiteral("contextModel"));
-            const auto vocab=snapshot.assets.value(QStringLiteral("contextVocab"));
-            const auto nwp=snapshot.assets.value(QStringLiteral("contextNwp"));
-            PredictionJob like{{}, model.path, vocab.path, {}, model.sha256 + vocab.sha256 + nwp.sha256};
-            like.nwp=nwp.path;
-            engine->setContextRescore(swipeContextRescore(&m_predictionWorker, like, snapshot.effectiveLanguage, m_swipeRescore));
-            if (m_profiles.snapshot().epoch==epoch) m_engine=std::move(engine);
+        if (snapshot.profileId==m_engineProfileId && m_engine) {
+            // WHY (device perf fix, 2026-11-08): a brief detour to a non-swipe profile (the symbols/numbers page
+            // flips inputMode to "Unsupported", below) left m_engine untouched; returning to this exact profile
+            // (same locale/layout/Latin) needs no rebuild. Re-parsing the whole dictionary on every letters<->
+            // symbols switch was fast enough to go unnoticed on upstream's own hardware but froze this device's
+            // ARM CPU for many seconds each way. Reusing the still-valid engine removes the reload entirely.
         } else {
-            snapshot.capabilities={}; snapshot.assets.clear(); snapshot.unavailableReason="Verified profile engine initialization failed";
+            swipekb::LanguageEngineSetup setup;
+            swipekb::configureLanguageEngine(snapshot,setup);
+            // WHY a fresh engine: never init() one already owned by a consumer/worker.
+            auto engine=std::make_shared<swipekb::LanguageEngine>();
+            if (engine->init(setup)) {
+                // Joint-model step 2: a swipe with words before is re-ranked with the sentence model the guess bar uses,
+                // borrowed from the next-word worker (no second copy in memory; see NextWordWorker::scoreForSwipe).
+                // WHY the same files and checksums as a next-word job (applyNeuralNextWord): the worker's model is used
+                // only when it is exactly this profile's; without a verified neural file this stays off.
+                const auto model=snapshot.assets.value(QStringLiteral("contextModel"));
+                const auto vocab=snapshot.assets.value(QStringLiteral("contextVocab"));
+                const auto nwp=snapshot.assets.value(QStringLiteral("contextNwp"));
+                PredictionJob like{{}, model.path, vocab.path, {}, model.sha256 + vocab.sha256 + nwp.sha256};
+                like.nwp=nwp.path;
+                engine->setContextRescore(swipeContextRescore(&m_predictionWorker, like, snapshot.effectiveLanguage, m_swipeRescore));
+                if (m_profiles.snapshot().epoch==epoch) { m_engine=std::move(engine); m_engineProfileId=snapshot.profileId; }
+            } else {
+                m_engine.reset(); m_engineProfileId.clear();
+                snapshot.capabilities={}; snapshot.assets.clear(); snapshot.unavailableReason="Verified profile engine initialization failed";
+            }
         }
     }
+    // WHY no "else { m_engine.reset(); }" here: a non-swipe profile (symbols/numbers page) must not discard the
+    // last swipe-capable engine. isReady() already gates on snapshot.capabilities.swipe, so leaving m_engine
+    // populated here cannot make swipe recognition active while this profile (e.g. "Unsupported" input mode)
+    // is current; it only lets the profile above reuse it on return instead of re-parsing the dictionary.
     // WHY forced: a fresh engine has none of the taught words yet.
     // WHY the language is remembered here: the profile is only published after this sync, so the published snapshot
     // still holds the previous language while the new engines are being filled with words.

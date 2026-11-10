@@ -125,6 +125,10 @@ private:
     swipekb::ProfileEpoch m_profiles;
     // The language's engine: the project's own swipe engine plus the dictionary (completion, tap-to-swap, spellings).
     std::shared_ptr<swipekb::LanguageEngine> m_engine;
+    // WHY (device perf fix, 2026-11-08): which profile m_engine was built for, so a brief detour to a non-swipe
+    // profile (the symbols/numbers page) doesn't force a full dictionary re-parse when returning to the same
+    // Latin profile. See resolveCurrentProfile().
+    QString m_engineProfileId;
     QString m_locale, m_layoutId, m_inputMode;
     void ensureContextConnections();
     void followContextLocale();
