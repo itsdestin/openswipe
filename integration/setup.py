@@ -524,6 +524,11 @@ class Controller:
             (self.data / learning.FLAG).touch()   # learning stays on if it was on
         return len(files)
 
+    def kde_keyboard(self):
+        """KDE's own on-screen keyboard, the keyboard to go back to when the earlier choice is unknown ('' = none)."""
+        kde = [Path(d) / 'applications/org.kde.plasma.keyboard.desktop' for d in self.system_data_dirs()]
+        return next((str(k) for k in kde if k.is_file()), '')
+
     def enable(self, always_available=False):
         self.check()
         with self.locked():
@@ -542,10 +547,17 @@ class Controller:
             # WHY (card #502): coming from the Flatpak, "the keyboard to go back to" would be the Flatpak, which is usually being
             # removed; disable would then leave no keyboard. Go back to KDE's own keyboard instead (or none, where there is none).
             if str(previous.get('InputMethod') or '').endswith('/org.itsdestin.SwipeKeyboard.desktop'):
-                kde = [Path(d) / 'applications/org.kde.plasma.keyboard.desktop' for d in self.system_data_dirs()]
-                previous['InputMethod'] = next((str(k) for k in kde if k.is_file()), '')
+                previous['InputMethod'] = self.kde_keyboard()
             if config['InputMethod']['effective'] == self.wanted['InputMethod']:
-                raise SetupError('OpenSwipe is selected without a setup record. Select your old keyboard before enabling.')
+                if config['InputMethod']['raw'] != self.wanted['InputMethod']:
+                    # WHY still refuse: ours comes from a system-wide default, not the person's own file; writing
+                    # and later removing their own entry would not change what KDE starts, so disable could not work.
+                    raise SetupError('OpenSwipe is selected without a setup record. Select your old keyboard before enabling.')
+                # WHY (issue #27): the person already picked OpenSwipe in System Settings, as the Flatpak instructions
+                # say, then ran enable. Their earlier keyboard is no longer recorded anywhere, so "go back" means KDE's
+                # own keyboard, the same choice as the Flatpak case above and the removal check. confirm_activation
+                # says so before asking.
+                previous['InputMethod'] = self.kde_keyboard()
             live_mode = self.read_live_mode()
             self.rebuild_layout()
             # WHY snapshot before writes: interrupted activation can be recovered with disable.
@@ -675,6 +687,9 @@ def confirm_activation(controller, assume_yes=False, always_available=False):
     state = controller.config_state()
     print('OpenSwipe will change these per-user KDE settings:')
     print(f"  InputMethod: {state['InputMethod']['effective']!r} -> {controller.wanted['InputMethod']!r}")
+    if not controller.state_file.exists() and state['InputMethod']['raw'] == controller.wanted['InputMethod']:
+        # WHY (issue #27): OpenSwipe was already picked in System Settings, so the keyboard used before is unknown.
+        print("  (already chosen in System Settings; disable will switch back to KDE's own keyboard)")
     if always_available:
         print(f"  VirtualKeyboardMode: {state['VirtualKeyboardMode']['effective']!r} -> '1' (explicit always-available choice)")
         print('This opt-in changes visibility policy and can allow pop-ups while a physical keyboard is attached.')

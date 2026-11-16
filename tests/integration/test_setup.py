@@ -615,6 +615,25 @@ class SetupTests(unittest.TestCase):
         self.controller.disable()
         self.assertEqual(self.commands.settings['InputMethod'], str(kde))
 
+    def test_already_chosen_in_system_settings_enables_and_disable_goes_back_to_kdes_keyboard(self):
+        # WHY (issue #27): people pick OpenSwipe in System Settings first, then run enable. That used to be refused.
+        self.commands.settings['InputMethod'] = self.controller.wanted['InputMethod']
+        kde = self.base / 'system-data/applications/org.kde.plasma.keyboard.desktop'
+        kde.parent.mkdir(parents=True)
+        kde.write_text('[Desktop Entry]\n')
+        self.controller.enable()
+        self.assertEqual(self.commands.settings['InputMethod'], self.controller.wanted['InputMethod'])
+        self.controller.disable()
+        self.assertEqual(self.commands.settings['InputMethod'], str(kde))
+
+    def test_ours_only_as_a_system_default_is_still_refused(self):
+        # WHY: the person's own file does not choose OpenSwipe, so disable could never switch away from it.
+        self.commands.settings.pop('InputMethod', None)
+        self.commands.defaults = {'InputMethod': self.controller.wanted['InputMethod']}
+        with self.assertRaisesRegex(self.module.SetupError, 'without a setup record'):
+            self.controller.enable()
+        self.assertFalse(self.controller.state_file.exists())
+
     def test_enable_applies_live_visibility_and_disable_restores_it(self):
         self.commands.live_mode = 2
         self.controller.enable(always_available=True)

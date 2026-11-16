@@ -62,12 +62,20 @@ class NativeConfig(unittest.TestCase):
     def test_unsupported_user_provenance_is_refused_by_real_probe(self):
         cases = ('[Wayland]\nInputMethod[$d]\n',
                  '[Wayland]\nVirtualKeyboardMode[$d]=\n', '[Wayland][$d]\n',
-                 '[Wayland]\nInputMethod[$e]=$HOME/example.desktop\n',
+                 '[Wayland]\nInputMethod[$e]=$XDG_DATA_HOME/example.desktop\n',
+                 '[Wayland]\nInputMethod[$e]=${HOME}/example.desktop\n',
+                 '[Wayland]\nInputMethod[$e]=$HOMEX/example.desktop\n',
+                 '[Wayland]\nInputMethod[$e]=/usr/$HOME/example.desktop\n',
+                 '[Wayland]\nInputMethod[$e]=$(echo /x)\n',
+                 '[Wayland]\nInputMethod[$i][$e]=/usr/share/applications/x.desktop\n',
+                 '[Wayland]\nInputMethod[$ie]=/usr/share/applications/x.desktop\n',
                  '[Wayland]\nVirtualKeyboardMode[$e]=$MODE\n',
+                 '[Wayland]junk\nInputMethod=value\n', '[Wayland]x]\nInputMethod=value\n',
+                 '[Wayland\nInputMethod=value\n',
                  '[Wayland]\nInputMethod[de]=localized.desktop\n',
                  '[Wayland]\nInputMethod[en_US][$e]=$HOME/example.desktop\n',
                  '[Wayland]\nInputMethod[$de]=$HOME/example.desktop\n',
-                 '[Wayland]\nInputMethod[$i][$d]=\n',
+                 '[Wayland]\nInputMethod[$i][$d]=\n', '[Wayland]\nInputMethod\n',
                  '[Wayland] [$d]\n', r'[Way\x6cand]' + '\nInputMethod=value\n',
                  '[Wayland]\nInputMethod[future-flag]=value\n',
                  '[Wayland]\nInputMethod\\x5b$e\\x5d=value\n')
@@ -78,6 +86,35 @@ class NativeConfig(unittest.TestCase):
                 result = subprocess.run([self.helper], env=self.env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 2, result.stdout)
                 self.assertIn('Unsupported user KConfig syntax', result.stderr)
+
+    def test_kde_settings_path_entries_and_odd_unrelated_groups_are_accepted(self):
+        # WHY (issue #27): System Settings -> Virtual Keyboard saves InputMethod as a KConfig
+        # "path" entry ([$e], home folder as $HOME), and upgraded systems keep groups such as
+        # [$Version]. Every one of these used to refuse "swipe-keyboard enable".
+        flatpak = '.local/share/flatpak/exports/share/applications/org.itsdestin.SwipeKeyboard.desktop'
+        cases = (('[Wayland]\nInputMethod[$e]=/usr/share/applications/org.kde.plasma.keyboard.desktop\n',
+                  '/usr/share/applications/org.kde.plasma.keyboard.desktop'),
+                 (f'[Wayland]\nInputMethod[$e]=$HOME/{flatpak}\n', f'{self.base}/{flatpak}'),
+                 ('[Wayland]\nInputMethod[$e]=/opt/price$$list.desktop\n', '/opt/price$list.desktop'),
+                 ('[$Version]\nupdate_info=kwin.upd:replace-scalein-with-scale\n'
+                  '[Script-tiling (ünïcode)+@]\nEnabled=true\n[Wayland]\nInputMethod=plain.desktop\n',
+                  'plain.desktop'),
+                 ('[Wayland][$i]\nInputMethod=locked.desktop\n', 'locked.desktop'))
+        for content, raw in cases:
+            with self.subTest(content=content):
+                (self.user / 'kwinrc').write_text(content)
+                self.assertEqual(self.probe()['InputMethod']['raw'], raw)
+
+    def test_kwriteconfig_path_type_matches_what_the_probe_accepts(self):
+        # WHY: pins the real format KDE writes, so a KConfig change that stops matching the
+        # accepted form shows up here instead of on someone's laptop.
+        for value in ('/usr/share/applications/openswipe.desktop', str(self.base / 'apps/x.desktop')):
+            with self.subTest(value=value):
+                (self.user / 'kwinrc').unlink(missing_ok=True)
+                subprocess.run(['kwriteconfig6', '--file', 'kwinrc', '--group', 'Wayland', '--key', 'InputMethod',
+                                '--type', 'path', value], env=self.env, check=True, capture_output=True)
+                self.assertIn('InputMethod[$e]=', (self.user / 'kwinrc').read_text())
+                self.assertEqual(self.probe()['InputMethod']['raw'], value)
 
     def test_native_kconfig_demonstrates_deletion_and_expansion_provenance(self):
         (self.high / 'kwinrc').write_text('[Wayland]\nInputMethod=inherited\n')
@@ -97,8 +134,8 @@ class NativeConfig(unittest.TestCase):
     def test_controller_refuses_unsupported_initial_and_later_user_state(self):
         import shutil
         from test_setup import SetupTests
-        for content in ('[Wayland]\nInputMethod[$d]\n', '[Wayland][$d]\n',
-                        '[Wayland]\nInputMethod[$e]=$HOME/example.desktop\n',
+        for content in ('[Wayland]\nInputMethod[$d]\n', '[Wayland] [$d]\n',
+                        '[Wayland]\nInputMethod[$e]=$XDG_DATA_HOME/example.desktop\n',
                         '[Wayland]\nInputMethod[de]=localized.desktop\n'):
             for later in (False, True):
                 with self.subTest(content=content, later=later):
@@ -149,7 +186,7 @@ class NativeConfig(unittest.TestCase):
                                  {'raw': 'plain.desktop', 'effective': 'plain.desktop', 'immutable': False})
                 self.assertEqual(state['VirtualKeyboardMode']['raw'], '1')
                 self.assertEqual(path.read_bytes(), before)
-                path.write_text(path.read_text() + '[Wayland]\nInputMethod[$e]=$HOME/relevant.desktop\n')
+                path.write_text(path.read_text() + '[Wayland]\nInputMethod[$e]=$XDG_DATA_HOME/relevant.desktop\n')
                 refused = subprocess.run([self.helper], env=self.env, text=True, capture_output=True)
                 self.assertEqual(refused.returncode, 2)
 
@@ -160,7 +197,7 @@ class NativeConfig(unittest.TestCase):
         before = path.read_bytes()
         self.assertIsNone(self.probe()['InputMethod']['raw'])
         self.assertEqual(path.read_bytes(), before)
-        for entry in ('InputMethod[$d]', 'InputMethod[$e]=$HOME/a', 'InputMethod[de]=a'):
+        for entry in ('InputMethod[$d]', 'InputMethod[$e]=$XDG_DATA_HOME/a', 'InputMethod[de]=a'):
             path.write_text(unrelated + '[Wayland]\n' + entry + '\n')
             result = subprocess.run([self.helper], env=self.env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 2)
@@ -281,6 +318,48 @@ class NativeConfig(unittest.TestCase):
                     self.assertEqual(state['InputMethod']['raw'], previous)
                     self.assertIsNone(state['VirtualKeyboardMode']['raw'])
                     self.assertEqual(unrelated(), enabled_unrelated)
+                finally:
+                    fixture.doCleanups()
+
+    def test_issue_27_choice_saved_by_system_settings_enables_and_disables_with_real_kconfig(self):
+        # WHY: the reporter's exact steps. System Settings saved the choice as a path entry ([$e]) next to an old
+        # [$Version] group; enable refused twice (odd syntax, then "already selected"). Real KConfig, no live bus.
+        import shutil
+        from test_setup import SetupTests
+        for chosen in ('ours', 'kde'):
+            with self.subTest(chosen=chosen):
+                fixture = SetupTests('test_enable_disable_restores_original_settings')
+                fixture.setUp()
+                try:
+                    controller = fixture.controller
+                    for key in ('DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY'):
+                        controller.env.pop(key, None)
+                    controller.env['XDG_CONFIG_DIRS'] = str(self.low)
+                    kde = Path(controller.env['SWIPEKB_SYSTEM_DATA_DIRS']) / 'applications/org.kde.plasma.keyboard.desktop'
+                    kde.parent.mkdir(parents=True)
+                    kde.write_text('[Desktop Entry]\n')
+                    config = Path(controller.env['XDG_CONFIG_HOME']) / 'kwinrc'
+                    config.parent.mkdir(parents=True)
+                    config.write_text('[$Version]\nupdate_info=kwin.upd:example\n\n' + BASELINE)
+                    picked = controller.wanted['InputMethod'] if chosen == 'ours' else str(kde)
+                    subprocess.run(['kwriteconfig6', '--file', str(config), '--group', 'Wayland', '--key', 'InputMethod',
+                                    '--type', 'path', picked], env=controller.env, check=True, capture_output=True)
+                    self.assertIn('InputMethod[$e]=', config.read_text())
+                    shutil.copy2(self.helper, controller.root / 'integration/swipekb-config')
+                    fake = fixture.commands
+                    def runner(args, **kwargs):
+                        name = Path(args[0]).name
+                        if name == 'swipekb-config':
+                            return subprocess.run(args, **kwargs)
+                        if name == 'kwriteconfig6':
+                            return subprocess.run([arg for arg in args if arg != '--notify'], **kwargs)
+                        return fake(args, **kwargs)
+                    controller.run = runner
+                    controller.enable()
+                    self.assertEqual(controller.config_state()['InputMethod']['effective'], controller.wanted['InputMethod'])
+                    controller.disable()
+                    self.assertEqual(controller.config_state()['InputMethod']['raw'], str(kde))
+                    self.assertIn('update_info=kwin.upd:example', config.read_text())
                 finally:
                     fixture.doCleanups()
 
