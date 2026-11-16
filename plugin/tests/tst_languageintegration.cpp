@@ -9,6 +9,7 @@
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QScopeGuard>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include "languagefixtures.h"
 #include <QtVirtualKeyboard/QVirtualKeyboardInputContext>
@@ -168,6 +169,75 @@ private slots:
         im.finishSwipe(trace("casa",spanishKeys),spanishKeys,abandoned);
         QCOMPARE(root->property("text").toString(),spanishCommitted);
         QVERIFY(!QFileInfo::exists(data.filePath("swipes.jsonl")));
+    }
+    // WHY (issue #24): "?123" switches the input mode away from Latin and back; rotation passes through the same path.
+    // Coming back must take the same engine back (no dictionary reload), while the detour itself exposes no engine.
+    void symbolsDetourReusesTheEngineAndNothingElseDoes() {
+        const auto assets=qEnvironmentVariable("SWIPEKB_TEST_ENGLISH_ASSETS"), packs=qEnvironmentVariable("SWIPEKB_TEST_LANGUAGE_PACKS");
+        if (assets.isEmpty() || packs.isEmpty()) QSKIP("Explicit pinned English assets and real language packs required");
+        QTemporaryDir data;
+        const QList<QByteArray> names{"SWIPEKB_MODEL_DATA","SWIPEKB_LANGUAGE_PACKS","SWIPEKB_DATA"};
+        QHash<QByteArray,QByteArray> old; QHash<QByteArray,bool> existed;
+        for (const auto &name:names) { old[name]=qgetenv(name); existed[name]=qEnvironmentVariableIsSet(name.constData()); }
+        const auto restore=qScopeGuard([&] { for(const auto &name:names) { if(existed[name]) qputenv(name,old[name]); else qunsetenv(name); } });
+        qputenv("SWIPEKB_MODEL_DATA",assets.toUtf8()); qputenv("SWIPEKB_LANGUAGE_PACKS",packs.toUtf8());
+        qputenv("SWIPEKB_DATA",data.path().toUtf8());
+        SwipeInputMethod im;
+        im.setPhysicalLayout("qwerty");
+        QElapsedTimer timer; timer.start();
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Latin);
+        const auto firstLoad=timer.elapsed();
+        QVERIFY2(im.isReady(),qPrintable(im.profileSnapshot().unavailableReason));
+        const auto english=im.languageEngine(); QVERIFY(english);
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Numeric);
+        QVERIFY(!im.isReady()); QVERIFY(!im.languageEngine());   // nothing may use English's engine in the detour
+        timer.restart();
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Latin);
+        const auto comeBack=timer.elapsed();
+        QVERIFY(im.isReady()); QCOMPARE(im.languageEngine().get(),english.get());
+        qInfo("first load %lld ms, return from the symbols page %lld ms",qint64(firstLoad),qint64(comeBack));
+        // An unsupported language in between is a detour too.
+        im.setInputMode("ja_JP",QVirtualKeyboardInputEngine::InputMode::Latin); QVERIFY(!im.languageEngine());
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Latin); QCOMPARE(im.languageEngine().get(),english.get());
+        // An unknown layout is a detour; another supported layout is another profile and gets its own engine.
+        im.setPhysicalLayout("unknown"); QVERIFY(!im.languageEngine());
+        im.setPhysicalLayout("qwerty"); QCOMPARE(im.languageEngine().get(),english.get());
+        im.setPhysicalLayout("azerty"); QVERIFY(im.isReady()); QVERIFY(im.languageEngine().get()!=english.get());
+        im.setPhysicalLayout("qwerty"); QVERIFY(im.isReady()); QVERIFY(im.languageEngine().get()!=english.get());
+        // Another swipe language, then back: never the old engine (its parked copy is dropped before Spanish is built).
+        const auto qwerty=im.languageEngine();
+        im.setInputMode("es_ES",QVirtualKeyboardInputEngine::InputMode::Latin);
+        QVERIFY(im.isReady()); QVERIFY(im.languageEngine().get()!=qwerty.get());
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Latin);
+        QVERIFY(im.isReady()); QVERIFY(im.languageEngine().get()!=qwerty.get());
+        // Forgetting what was learned during a detour: the parked engine still holds those words, so it is not reused.
+        const auto beforeForget=im.languageEngine();
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Numeric);
+        im.forgetEverythingLearned();
+        im.setInputMode("en_US",QVirtualKeyboardInputEngine::InputMode::Latin);
+        QVERIFY(im.isReady()); QVERIFY(im.languageEngine().get()!=beforeForget.get());
+    }
+    // WHY (issue #24): checksums are remembered, but a file changed after its first check must still be refused, even
+    // when its size and modification time are put back exactly.
+    void rememberedChecksumsNeverHideAChangedFile() {
+        const auto packs=qEnvironmentVariable("SWIPEKB_TEST_LANGUAGE_PACKS");
+        if (packs.isEmpty() || !QFileInfo::exists(packs+"/es.json")) QSKIP("Explicit verified pack fixture required");
+        QTemporaryDir root;
+        for (const auto &name:QDir(packs).entryList(QDir::Files))
+            QVERIFY(QFile::copy(QDir(packs).filePath(name),root.filePath(name)));
+        QVERIFY(swipekb::resolveProfile("es-ES","qwerty","Latin",root.path()).capabilities.swipe);
+        QVERIFY(swipekb::resolveProfile("es-ES","qwerty","Latin",root.path()).capabilities.swipe);   // remembered
+        QFile dictionary(root.filePath("es.combined"));
+        const auto modified=QFileInfo(dictionary).lastModified();
+        QVERIFY(dictionary.open(QIODevice::ReadWrite));
+        QVERIFY(dictionary.seek(dictionary.size()/2)); char byte=0; QVERIFY(dictionary.getChar(&byte));
+        QVERIFY(dictionary.seek(dictionary.size()/2)); QVERIFY(dictionary.putChar(char(byte^0x20)));
+        QVERIFY(dictionary.flush());   // WHY: the byte must reach the file before its time is put back
+        QVERIFY(dictionary.setFileTime(modified,QFileDevice::FileModificationTime));
+        dictionary.close();
+        QCOMPARE(QFileInfo(dictionary).lastModified(),modified);
+        const auto changed=swipekb::resolveProfile("es-ES","qwerty","Latin",root.path());
+        QVERIFY(!changed.capabilities.swipe); QVERIFY(changed.unavailableReason.contains("checksum"));
     }
     void switchesRevokeAuthority() {
         QTemporaryDir root;
