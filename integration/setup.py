@@ -218,20 +218,24 @@ class Controller:
         legacy = (self.stock / 'en_US').is_dir()
         if found and found >= (7, 0, 0):
             # WHY: a new major version means a new Qt major; our Qt 6 modules could not load there.
-            raise SetupError(f'Plasma Keyboard {text.split()[-1]} is newer than this OpenSwipe supports (6.7 to 6.x); '
+            raise SetupError(f'Plasma Keyboard {text.split()[-1]} is newer than this OpenSwipe supports (6.6 to 6.x); '
                              'it steps aside and the plain KDE keyboard is used.')
         if found and found >= NEW_CORE_VERSION:
             if not new_core:
                 raise SetupError('Plasma Keyboard ' + text + ' has no keyboard packages OpenSwipe can extend; '
                                  'the plain KDE keyboard is used.')
             return 'plasma69', text
-        if found and found >= (6, 7, 0):
+        # WHY 6.6 too (issue #24 comment): its keyboard program and English layouts match 6.7's for everything this
+        # add-on touches (compared at the v6.6.5 and v6.7.0 tags); the one difference, KWin's visibility setting, is
+        # handled in read_live_mode. Reported working on postmarketOS (Plasma Keyboard 6.6.6). Our packages still
+        # require 6.7, because every distribution they are built for ships it; this serves source builds.
+        if found and found >= (6, 6, 0):
             if not legacy:
                 raise SetupError('Stock Plasma Keyboard English layouts are missing.')
             return 'legacy', text
         if not found and new_core != legacy:
             return ('plasma69' if new_core else 'legacy'), text
-        raise SetupError('This candidate targets Plasma Keyboard 6.7 or newer (6.x); installed version: ' + text)
+        raise SetupError('This candidate targets Plasma Keyboard 6.6 or newer (6.x); installed version: ' + text)
 
     def qt_check(self):
         try:
@@ -406,7 +410,9 @@ class Controller:
                 raise ValueError('unexpected visibility ownership')
             if (type(schema) is not int or schema not in (1, 2, 3) or
                     not all(valid_value(v) for v in state['previous'].values()) or
-                    type(state['live_mode']) is not int or state['live_mode'] not in (0, 1, 2)):
+                    not (state['live_mode'] in (0, 1, 2) and type(state['live_mode']) is int or
+                         # WHY: a KWin older than 6.7 has no mode to record; only the preserve policy can be on one.
+                         (schema == 3 and state['live_mode'] is None and state.get('visibility_policy') == 'preserve'))):
                 raise ValueError('unexpected values')
             pending = state.get('mode_restore')
             if pending is not None and (not isinstance(pending, dict) or set(pending) != {'before', 'target'} or
@@ -436,8 +442,23 @@ class Controller:
                       *map(str, key)])
 
     def read_live_mode(self):
-        value = self.command(['busctl', '--user', 'get-property', 'org.kde.KWin', '/VirtualKeyboard',
-                              'org.kde.kwin.VirtualKeyboard', 'mode'])
+        """KWin's live keyboard visibility mode (0, 1 or 2), or None for a KWin older than 6.7, which has none."""
+        try:
+            value = self.command(['busctl', '--user', 'get-property', 'org.kde.KWin', '/VirtualKeyboard',
+                                  'org.kde.kwin.VirtualKeyboard', 'mode'])
+        except SetupError as missing:
+            # WHY (issues #24 and #27): KWin 6.6 and older have an on/off "enabled" property instead of "mode", so the
+            # read above fails there, also when only the keyboard package was upgraded to 6.7. The person's visibility
+            # setting is then simply left alone. WHY ask for "enabled" rather than accept any failure: on a 6.7+ KWin
+            # that call fails as well, so a real fault there still stops setup instead of being mistaken for "older".
+            try:
+                old = self.command(['busctl', '--user', 'get-property', 'org.kde.KWin', '/VirtualKeyboard',
+                                    'org.kde.kwin.VirtualKeyboard', 'enabled'])
+            except SetupError:
+                raise missing from None
+            if old in ('b true', 'b false'):
+                return None
+            raise missing
         if value not in ('i 0', 'i 1', 'i 2'):
             raise SetupError('KWin returned an unknown keyboard visibility mode; nothing was changed.')
         return int(value[2:])
@@ -559,6 +580,10 @@ class Controller:
                 # says so before asking.
                 previous['InputMethod'] = self.kde_keyboard()
             live_mode = self.read_live_mode()
+            if always_available and live_mode is None:
+                # WHY before any write: the "always available" mode exists only from KDE Plasma 6.7 on.
+                raise SetupError('--always-available needs KDE Plasma 6.7 or newer (this KWin has no visibility mode). '
+                                 'Run "swipe-keyboard enable" without it; nothing was changed.')
             self.rebuild_layout()
             # WHY snapshot before writes: interrupted activation can be recovered with disable.
             state = {'schema': 3, 'previous': previous, 'wanted': self.wanted, 'live_mode': live_mode,

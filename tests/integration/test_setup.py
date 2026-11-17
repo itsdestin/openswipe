@@ -24,6 +24,7 @@ class Commands:
         self.fail_key = None
         self.fedora_commands = False
         self.live_mode = 0
+        self.old_kwin = False
         self.arch_qtpaths = False
         self.probe_answers_qt = True
         self.preflight_error = None
@@ -71,7 +72,12 @@ class Commands:
             else:
                 self.settings[key] = args[-1]
         elif command == 'busctl':
-            if 'get-property' in args:
+            if 'get-property' in args and self.old_kwin:
+                # KWin 6.6 and older: "enabled" instead of "mode".
+                if args[-1] != 'enabled':
+                    raise subprocess.CalledProcessError(1, args, stderr='Unknown property or interface.')
+                value = 'b true'
+            elif 'get-property' in args:
                 value = 'i ' + str(self.live_mode)
             elif 'set-property' in args:
                 self.live_mode = int(args[-1])
@@ -633,6 +639,44 @@ class SetupTests(unittest.TestCase):
         with self.assertRaisesRegex(self.module.SetupError, 'without a setup record'):
             self.controller.enable()
         self.assertFalse(self.controller.state_file.exists())
+
+    def test_plasma_66_and_an_older_kwin_enable_and_disable_leaving_visibility_alone(self):
+        # WHY (issues #24 and #27): Plasma Keyboard 6.6, or a 6.7 keyboard on an older KWin, has no visibility mode.
+        for version in ('plasma-keyboard 6.6.6', 'plasma-keyboard 6.7.5'):
+            with self.subTest(version=version):
+                self.commands.plasma_version = version
+                self.commands.old_kwin = True
+                self.controller.enable()
+                self.assertEqual(self.commands.settings['InputMethod'], self.controller.wanted['InputMethod'])
+                self.assertIsNone(json.loads(self.controller.state_file.read_text())['live_mode'])
+                self.controller.disable()
+                self.assertEqual(self.commands.settings['InputMethod'], '/old/keyboard.desktop')
+                self.assertEqual(self.commands.settings['VirtualKeyboardMode'], '0')
+                self.assertFalse(any('set-property' in call for call in self.commands.calls))
+
+    def test_always_available_on_an_older_kwin_is_refused_before_any_change(self):
+        self.commands.old_kwin = True
+        with self.assertRaisesRegex(self.module.SetupError, 'needs KDE Plasma 6.7'):
+            self.controller.enable(always_available=True)
+        self.assertFalse(self.controller.state_file.exists())
+        self.assertEqual(self.commands.settings['InputMethod'], '/old/keyboard.desktop')
+
+    def test_a_failing_mode_read_on_a_current_kwin_still_stops_setup(self):
+        # WHY: only a KWin that answers the older "enabled" property counts as older; any other failure is real.
+        original = self.controller.run
+        def broken(args, **kwargs):
+            if Path(args[0]).name == 'busctl' and 'get-property' in args:
+                raise subprocess.CalledProcessError(1, args, stderr='Connection refused')
+            return original(args, **kwargs)
+        self.controller.run = broken
+        with self.assertRaisesRegex(self.module.SetupError, 'busctl failed'):
+            self.controller.enable()
+        self.assertFalse(self.controller.state_file.exists())
+
+    def test_plasma_65_is_still_refused(self):
+        self.commands.plasma_version = 'plasma-keyboard 6.5.4'
+        with self.assertRaisesRegex(self.module.SetupError, '6.6 or newer'):
+            self.controller.check()
 
     def test_enable_applies_live_visibility_and_disable_restores_it(self):
         self.commands.live_mode = 2
