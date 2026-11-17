@@ -4,6 +4,7 @@
 
 #include "swipeinputmethod.h"
 
+#include <algorithm>
 #include <cmath>
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -124,6 +125,22 @@ SwipeInputMethod::SwipeInputMethod(QObject *parent, NextWordWorker::Inference in
         });
 }
 
+// WHY every verified file and its checksum, not just locale:layout:mode: an engine may be reused only when it would be
+// built from exactly the same files (a language-pack update in between must give a fresh one).
+static QString engineIdentity(const swipekb::ProfileSnapshot &snapshot)
+{
+    QStringList parts{snapshot.profileId, snapshot.effectiveLanguage, snapshot.packId, snapshot.packVersion,
+                      snapshot.textRulesVersion, snapshot.regionalPolicyVersion,
+                      QString::number(snapshot.capabilities.contextRanking), QString::number(snapshot.capabilities.nextWord)};
+    auto roles=snapshot.assets.keys();
+    std::sort(roles.begin(), roles.end());
+    for (const auto &role:roles) {
+        const auto &a=snapshot.assets[role];
+        parts << role << a.path << a.sha256 << a.compatibility;
+    }
+    return parts.join(QChar(0x1f));
+}
+
 void SwipeInputMethod::resolveCurrentProfile()
 {
     // WHY one profile authority: predictions consume the language-owned epoch/assets, never a
@@ -132,7 +149,18 @@ void SwipeInputMethod::resolveCurrentProfile()
     QPointer<SwipeInputMethod> self(this);
     reset();
     if (!self) return;
-    m_engine.reset();
+    // WHY park instead of drop (issue #24): the "?123" page and screen rotation pass through a non-swipe profile and
+    // straight back. Rebuilding the engine on return re-read the whole dictionary and re-cased every word, a freeze of
+    // several seconds on phone CPUs. m_engine itself is still cleared, so nothing (completions, learning, diagnostics)
+    // can use one language's engine while another profile is current; the parked one is only taken back below for the
+    // identical profile with the identical verified files.
+    if (m_engine) {
+        m_parkedEngine=std::move(m_engine);
+        m_parkedEngineKey=m_engineKey;
+        // The learned-word sync record belongs to the parked engine only if it was this engine that was synced.
+        m_parkedSync=m_syncedEngine==m_parkedEngine.get() ? m_lastSync : SyncRecord{};
+    }
+    m_engine.reset(); m_engineKey.clear();
     m_layoutKeys.clear(); // WHY: another layout's key positions would give a typed word a wrong made-up path
     m_predictionModelState=swipekb::PredictionModelState::NotRequested;
     emit profileChanged();
@@ -141,7 +169,15 @@ void SwipeInputMethod::resolveCurrentProfile()
     // uses the very same functions, so both keyboards give the same words.
     const QString root=swipekb::languageModelRoot(m_locale,SwipeRecorder::modelDir());
     auto snapshot=swipekb::resolveProfile(m_locale,m_layoutId,m_inputMode,root,epoch);
-    if (snapshot.capabilities.swipe) {
+    const QString engineKey=snapshot.capabilities.swipe ? engineIdentity(snapshot) : QString();
+    bool reused=false;
+    if (snapshot.capabilities.swipe && m_parkedEngine && engineKey==m_parkedEngineKey) {
+        m_engine=std::move(m_parkedEngine); m_engineKey=engineKey; reused=true;
+        m_lastSync=m_parkedSync; m_syncedEngine=m_parkedSync.engine;
+        m_syncedModel=m_parkedSync.model; m_syncedVersion=m_parkedSync.version;
+    } else if (snapshot.capabilities.swipe) {
+        // WHY free the parked engine before building: two dictionaries in memory at once would double the peak.
+        m_parkedEngine.reset(); m_parkedEngineKey.clear();
         swipekb::LanguageEngineSetup setup;
         swipekb::configureLanguageEngine(snapshot,setup);
         // WHY a fresh engine: never init() one already owned by a consumer/worker.
@@ -157,7 +193,7 @@ void SwipeInputMethod::resolveCurrentProfile()
             PredictionJob like{{}, model.path, vocab.path, {}, model.sha256 + vocab.sha256 + nwp.sha256};
             like.nwp=nwp.path;
             engine->setContextRescore(swipeContextRescore(&m_predictionWorker, like, snapshot.effectiveLanguage, m_swipeRescore));
-            if (m_profiles.snapshot().epoch==epoch) m_engine=std::move(engine);
+            if (m_profiles.snapshot().epoch==epoch) { m_engine=std::move(engine); m_engineKey=engineKey; }
         } else {
             snapshot.capabilities={}; snapshot.assets.clear(); snapshot.unavailableReason="Verified profile engine initialization failed";
         }
@@ -166,7 +202,9 @@ void SwipeInputMethod::resolveCurrentProfile()
     // WHY the language is remembered here: the profile is only published after this sync, so the published snapshot
     // still holds the previous language while the new engines are being filled with words.
     m_wordsLanguage=snapshot.effectiveLanguage;
-    syncLearnedWords(true);
+    // WHY not forced for a reused engine: it already holds the taught words, texting words and capitals; re-adding them
+    // would make the next swipe rebuild its whole word list. syncLearnedWords still refills it if anything changed.
+    syncLearnedWords(!reused);
     if (m_profiles.publish(snapshot)) emit profileChanged();
 }
 
@@ -1643,8 +1681,10 @@ void SwipeInputMethod::syncLearnedWords(bool force)
 {
     auto *model=personal();
     const std::uint64_t version=model ? model->swipeWordsVersion() : 0;
-    if (!force && model==m_syncedModel && version==m_syncedVersion && m_engine.get()==m_syncedEngine) return;
+    if (!force && model==m_syncedModel && version==m_syncedVersion && m_engine.get()==m_syncedEngine
+        && m_wordsLanguage==m_lastSync.language) return;
     m_syncedModel=model; m_syncedVersion=version; m_syncedEngine=m_engine.get();
+    m_lastSync={model, version, m_engine.get(), m_wordsLanguage};
     std::vector<std::pair<std::string,int>> words;
     if (model) words=model->swipeWords(LearningManager::now());
     for (const auto &w:words) m_injected.insert(QString::fromStdString(w.first));
@@ -1704,6 +1744,8 @@ void SwipeInputMethod::forgetEverythingLearned()
     QPointer<SwipeInputMethod> self(this);
     m_learning.forgetAll();
     m_lastLearn={}; m_lastLearnModel=nullptr;
+    // WHY drop a parked engine: it still holds the forgotten words, and nothing else would refill it on return.
+    m_parkedEngine.reset(); m_parkedEngineKey.clear();
     syncLearnedWords(true);
     invalidatePredictions();
     if (self) refreshGuessBar();

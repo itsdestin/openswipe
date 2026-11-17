@@ -43,6 +43,9 @@ public:
     SwipeInputMethod(QObject *parent, NextWordWorker::Inference inference, NextWordWorker::Scorer scorer = {});
     ~SwipeInputMethod() override;
     swipekb::ProfileSnapshot profileSnapshot() const { return m_profiles.snapshot(); }
+    // The current language engine (null while the profile cannot swipe). WHY shared: lets tests hold one and check it is
+    // taken back after a detour, without its address being reused by a new engine.
+    std::shared_ptr<const swipekb::LanguageEngine> languageEngine() const { return m_engine; }
     Q_INVOKABLE void setPhysicalLayout(const QString &layoutId);
 
     QList<QVirtualKeyboardInputEngine::InputMode> inputModes(const QString &locale) override;
@@ -125,6 +128,12 @@ private:
     swipekb::ProfileEpoch m_profiles;
     // The language's engine: the project's own swipe engine plus the dictionary (completion, tap-to-swap, spellings).
     std::shared_ptr<swipekb::LanguageEngine> m_engine;
+    // WHY (issue #24): the engine of the profile left last, kept so a quick detour (the "?123" page, a rotation) can take
+    // it back instead of rebuilding it. Never used directly; see resolveCurrentProfile().
+    struct SyncRecord { const void *model=nullptr; std::uint64_t version=0; const void *engine=nullptr; QString language; };
+    std::shared_ptr<swipekb::LanguageEngine> m_parkedEngine;
+    QString m_engineKey, m_parkedEngineKey;   // the exact profile and verified files each engine was built from
+    SyncRecord m_lastSync, m_parkedSync;      // what syncLearnedWords last put into an engine
     QString m_locale, m_layoutId, m_inputMode;
     void ensureContextConnections();
     void followContextLocale();
