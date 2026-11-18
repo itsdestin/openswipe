@@ -208,6 +208,8 @@ def check_versions(contract):
 
 
 README = ROOT/'README.md'
+# WHY these too (0.6.1-1): they carry download links of their own, which had to be moved by hand.
+GUIDES = (README, ROOT/'docs/steam-deck.md', ROOT/'docs/install-details.md')
 DOWNLOAD = re.compile(r'https://github\.com/itsdestin/openswipe/releases/download/v([0-9][0-9.]*-[0-9][0-9.]*)/')
 
 
@@ -333,9 +335,10 @@ def main():
         changed = args.changed.read_text().splitlines() if args.changed and args.changed.is_file() else None
         print(run_mode(os.environ, changed))
     elif args.command == 'readme':
-        text, previous = update_readme(README.read_text(), contract)
-        README.write_text(text)
-        print(f'README now points at {version(contract)} (was {previous}); review the diff before committing')
+        for guide in GUIDES:
+            text, previous = update_readme(guide.read_text(), contract)
+            guide.write_text(text)
+            print(f'{guide.relative_to(ROOT)} now points at {version(contract)} (was {previous}); review the diff before committing')
     elif args.command == 'check-versions':
         check_versions(contract)
         print('Release recipe versions agree: ' + version(contract))
