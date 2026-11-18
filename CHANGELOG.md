@@ -1,5 +1,23 @@
 # Changes
 
+## v0.6.1-1
+
+> **Installed before 30 October 2026 (older than version 0.5.1-1)?** Install it once more (README, Install). Older
+> versions can't find updates after the move to the new name. After that it updates itself.
+
+- **No freeze returning from "?123" or after a rotation** (issue #24; ideas from PR #25 by amruthwo). The language
+  engine of the profile just left is parked and taken back for the identical profile and verified files, instead of
+  re-reading the dictionary and re-casing every word. Learned words are not re-added when unchanged, `setCapitals`
+  with the same table returns at once, and file checksums are remembered per file stamp (device, inode, size,
+  modification and change time). About 1.2 s to under 1 ms on an x86 laptop; seconds on phones.
+- **`enable` after choosing OpenSwipe in System Settings** (issue #27). The kwinrc ownership check accepts KDE's path
+  entries (`[$e]`, home folder as `$HOME`) when they read back as the same text, and parses group headers as KConfig
+  does, so unrelated groups such as `[$Version]` no longer block setup. An existing choice of OpenSwipe is adopted;
+  `disable` then goes back to KDE's own keyboard.
+- **KWin older than 6.7, Plasma Keyboard 6.6:** setup leaves the visibility setting alone where KWin has no visibility
+  mode (it answers the older `enabled` property) and refuses `--always-available` there before any change. Setup
+  accepts Plasma Keyboard 6.6 (source builds; package floors stay at 6.7).
+
 ## v0.6.0-1
 
 > **Installed before 30 October 2026 (older than version 0.5.1-1)?** Install it once more (README, Install). Older

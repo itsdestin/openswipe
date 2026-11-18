@@ -1104,6 +1104,10 @@ int LanguageEngine::frequency(const std::string &word) const
 void LanguageEngine::setCapitals(std::shared_ptr<const Capitals> capitals)
 {
     if (!d_->ok || d_->keepCase) return;
+    // WHY (issue #24, from PR #25 by amruthwo): capitalsFor() keeps one Capitals per language, so the same pointer means
+    // every entry is already in this form (words added since went through displayForm too). Redoing all ~250k entries
+    // and marking the swipe word list for a rebuild cost seconds on a phone, for no change.
+    if (capitals == d_->capitals) return;
     d_->capitals = std::move(capitals);
     // WHY every word again: entries keep the form they are shown in, and the swipe word list is rebuilt from them.
     for (auto &e : d_->entries) e.text = d_->displayForm(QString::fromStdString(e.text)).toStdString();

@@ -120,7 +120,7 @@ class FrontEndSelection(unittest.TestCase):
             ('plasma-keyboard 7.1.2', None),
             ('plasma-keyboard 6.9.0', 'no-packages'),         # 6.9 binary but no 6.9 keyboard packages
             ('plasma-keyboard 6.8.5', 'no-legacy'),           # 6.8 binary but no Qt Virtual Keyboard layouts
-            ('plasma-keyboard 6.6.0', None),
+            ('plasma-keyboard 6.5.4', None),                 # older than 6.6: never verified
             ('plasma-keyboard (garbled)', 'both'),            # unknown version and both kinds of files
         ]
         for version, damage in cases:

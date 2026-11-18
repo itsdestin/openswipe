@@ -13,6 +13,9 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QResource>
+#include <map>
+#include <mutex>
+#include <sys/stat.h>
 
 static void initLanguageAssets() { Q_INIT_RESOURCE(language_assets); }
 namespace swipekb {
@@ -42,13 +45,51 @@ static QString localPath(const QString &root, const QString &relative)
     if (base.isEmpty() || !path.startsWith(base + '/') || !QFileInfo(path).isFile()) return {};
     return path;
 }
+// Which exact file contents a checksum belongs to. WHY device, inode, size and both times to the nanosecond: any write
+// changes the modification and the change time (the change time cannot be set back by a program), and a package
+// update replaces the file with a new inode, so a remembered checksum is never handed out for different bytes.
+struct FileStamp {
+    dev_t device=0; ino_t inode=0; off_t size=0; timespec modified{}, changed{};
+    bool operator==(const FileStamp &o) const
+    {
+        return device==o.device && inode==o.inode && size==o.size && modified.tv_sec==o.modified.tv_sec &&
+               modified.tv_nsec==o.modified.tv_nsec && changed.tv_sec==o.changed.tv_sec && changed.tv_nsec==o.changed.tv_nsec;
+    }
+};
+static bool stampOf(const struct stat &st, FileStamp &out)
+{
+    if (!S_ISREG(st.st_mode)) return false;
+    out={st.st_dev, st.st_ino, st.st_size, st.st_mtim, st.st_ctim};
+    return true;
+}
 static QString digest(const QString &path)
 {
+    // WHY remembered (issue #24, idea from PR #25 by amruthwo): every return from the "?123" page or a rotation
+    // re-verified the language's files (about 60 MB for English), hundreds of milliseconds on a phone CPU. Each file is
+    // still checked in full the first time and again whenever its stamp changes.
+    static std::mutex lock;
+    static std::map<QString, std::pair<FileStamp, QString>> known;
+    const QByteArray native=QFile::encodeName(path);
+    struct stat st{};
+    FileStamp before;
+    if (::stat(native.constData(), &st)==0 && stampOf(st, before)) {
+        std::lock_guard<std::mutex> guard(lock);
+        const auto it=known.find(path);
+        if (it!=known.end() && it->second.first==before) return it->second.second;
+    }
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) return {};
+    // WHY the open file's own stamp, before and after reading: remember only bytes that did not change while hashed.
+    const bool stamped=::fstat(file.handle(), &st)==0 && stampOf(st, before);
     QCryptographicHash hash(QCryptographicHash::Sha256);
     if (!hash.addData(&file)) return {};
-    return QString::fromLatin1(hash.result().toHex());
+    const QString result=QString::fromLatin1(hash.result().toHex());
+    FileStamp after;
+    if (stamped && ::fstat(file.handle(), &st)==0 && stampOf(st, after) && after==before) {
+        std::lock_guard<std::mutex> guard(lock);
+        known[path]={before, result};
+    }
+    return result;
 }
 static QJsonObject readObject(const QString &path)
 {

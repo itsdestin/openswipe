@@ -1,6 +1,6 @@
 # OpenSwipe for KDE Plasma
 
-Swipe across the letters to type a word, or tap as usual. Test release **v0.6.0-1**. Formerly **Swipe Keyboard**: same keyboard, new name (the package and command are still called `swipe-keyboard`).
+Swipe across the letters to type a word, or tap as usual. Test release **v0.6.1-1**. Formerly **Swipe Keyboard**: same keyboard, new name (the package and command are still called `swipe-keyboard`).
 
 <!-- WHY (Destin, 2026-11-02): versions before 0.5.1-1 cannot find updates after the move to the new name (GitHub does not
      forward the update website), and 0.4.0 and older never updated themselves. Keep this line for the next few releases. -->
@@ -42,11 +42,11 @@ never the rest of your system. **Removing** it, on every system, gives you your 
 
 KDE editions of Bazzite only; its GNOME editions are not supported.
 
-1. **[Download this file](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard-0.6.0-1-steamos-x86_64.tar.gz)** in **Desktop Mode** to **Downloads**. It is one file for Desktop Mode and Gaming Mode.
+1. **[Download this file](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard-0.6.1-1-steamos-x86_64.tar.gz)** in **Desktop Mode** to **Downloads**. It is one file for Desktop Mode and Gaming Mode.
 2. Open **Konsole** and run this **without `sudo`**:
 
    ```sh
-   cd ~/Downloads && tar xzf swipe-keyboard-0.6.0-1-steamos-x86_64.tar.gz && cd swipe-keyboard-steamos-0.6.0-1
+   cd ~/Downloads && tar xzf swipe-keyboard-0.6.1-1-steamos-x86_64.tar.gz && cd swipe-keyboard-steamos-0.6.1-1
    bash install.sh
    ```
 
@@ -69,10 +69,10 @@ flatpak run --user --command=kcmshell6 org.itsdestin.SwipeKeyboard kcm_plasmakey
 
 ### Arch / CachyOS
 
-1. **[Download the package](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard-0.6.0-1-x86_64.pkg.tar.zst)**, then in Konsole:
+1. **[Download the package](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard-0.6.1-1-x86_64.pkg.tar.zst)**, then in Konsole:
 
    ```sh
-   sudo pacman -U ~/Downloads/swipe-keyboard-0.6.0-1-x86_64.pkg.tar.zst
+   sudo pacman -U ~/Downloads/swipe-keyboard-0.6.1-1-x86_64.pkg.tar.zst
    ```
 
 2. [Turn it on](#turn-it-on-regular-packages).
@@ -83,16 +83,16 @@ flatpak run --user --command=kcmshell6 org.itsdestin.SwipeKeyboard kcm_plasmakey
 
 1. Download the file for your device (unsure? run `uname -m`) and run its line in Konsole:
 
-   **Intel / AMD (x86_64):** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard-0.6.0-1.fc44.x86_64.rpm)
+   **Intel / AMD (x86_64):** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard-0.6.1-1.fc44.x86_64.rpm)
 
    ```sh
-   sudo dnf install ~/Downloads/swipe-keyboard-0.6.0-1.fc44.x86_64.rpm
+   sudo dnf install ~/Downloads/swipe-keyboard-0.6.1-1.fc44.x86_64.rpm
    ```
 
-   **ARM64 (aarch64):** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard-0.6.0-1.fc44.aarch64.rpm)
+   **ARM64 (aarch64):** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard-0.6.1-1.fc44.aarch64.rpm)
 
    ```sh
-   sudo dnf install ~/Downloads/swipe-keyboard-0.6.0-1.fc44.aarch64.rpm
+   sudo dnf install ~/Downloads/swipe-keyboard-0.6.1-1.fc44.aarch64.rpm
    ```
 
 2. [Turn it on](#turn-it-on-regular-packages).
@@ -103,16 +103,16 @@ flatpak run --user --command=kcmshell6 org.itsdestin.SwipeKeyboard kcm_plasmakey
 
 1. Download the file for your system and run its line in Konsole:
 
-   **Kubuntu 26.10:** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard_0.6.0-1.kubuntu26.10_amd64.deb)
+   **Kubuntu 26.10:** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard_0.6.1-1.kubuntu26.10_amd64.deb)
 
    ```sh
-   sudo apt install ~/Downloads/swipe-keyboard_0.6.0-1.kubuntu26.10_amd64.deb
+   sudo apt install ~/Downloads/swipe-keyboard_0.6.1-1.kubuntu26.10_amd64.deb
    ```
 
-   **Debian testing:** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard_0.6.0-1.debiantesting_amd64.deb)
+   **Debian testing:** [download](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard_0.6.1-1.debiantesting_amd64.deb)
 
    ```sh
-   sudo apt install ~/Downloads/swipe-keyboard_0.6.0-1.debiantesting_amd64.deb
+   sudo apt install ~/Downloads/swipe-keyboard_0.6.1-1.debiantesting_amd64.deb
    ```
 
 2. [Turn it on](#turn-it-on-regular-packages).
@@ -121,10 +121,10 @@ flatpak run --user --command=kcmshell6 org.itsdestin.SwipeKeyboard kcm_plasmakey
 
 ### openSUSE Tumbleweed
 
-1. **[Download the package](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard-0.6.0-1.tumbleweed.x86_64.rpm)**, then in Konsole:
+1. **[Download the package](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard-0.6.1-1.tumbleweed.x86_64.rpm)**, then in Konsole:
 
    ```sh
-   sudo zypper install --allow-unsigned-rpm ~/Downloads/swipe-keyboard-0.6.0-1.tumbleweed.x86_64.rpm
+   sudo zypper install --allow-unsigned-rpm ~/Downloads/swipe-keyboard-0.6.1-1.tumbleweed.x86_64.rpm
    ```
 
    `--allow-unsigned-rpm` because the file itself is not signed; automatic updates check every new version against a signed list instead.
@@ -138,10 +138,10 @@ Their KDE is too old for the regular package, so they use the Flatpak app (the s
 Gaming Mode). Tested on Kubuntu 26.04 and Debian 13 (virtual machines); Leap 16 not yet.
 
 1. Kubuntu and Debian come without Flatpak. Once: `sudo apt install flatpak`, then **log out and back in**.
-2. **[Download the Flatpak file](https://github.com/itsdestin/openswipe/releases/download/v0.6.0-1/swipe-keyboard-0.6.0-1-steamos-x86_64.tar.gz)** to **Downloads** and run, **without `sudo`**:
+2. **[Download the Flatpak file](https://github.com/itsdestin/openswipe/releases/download/v0.6.1-1/swipe-keyboard-0.6.1-1-steamos-x86_64.tar.gz)** to **Downloads** and run, **without `sudo`**:
 
    ```sh
-   cd ~/Downloads && tar xzf swipe-keyboard-0.6.0-1-steamos-x86_64.tar.gz && cd swipe-keyboard-steamos-0.6.0-1
+   cd ~/Downloads && tar xzf swipe-keyboard-0.6.1-1-steamos-x86_64.tar.gz && cd swipe-keyboard-steamos-0.6.1-1
    bash install.sh
    ```
 
@@ -182,7 +182,7 @@ Then touch a text field. Trouble removing? See the [recovery guide](docs/install
 - **No next-word suggestions?** Pick a supported language, type a word with this keyboard, then press Space. Password fields offer none.
 - **Only one app misbehaves?** Try another KDE Wayland app; support varies.
 
-[More help, recovery and privacy](docs/install-details.md) · [Steam Deck details](docs/steam-deck.md) · [Report a bug](https://github.com/itsdestin/openswipe/issues/new?template=bug.yml) · [Release notes](docs/releases/v0.6.0-1.md) · [Changelog](CHANGELOG.md)
+[More help, recovery and privacy](docs/install-details.md) · [Steam Deck details](docs/steam-deck.md) · [Report a bug](https://github.com/itsdestin/openswipe/issues/new?template=bug.yml) · [Release notes](docs/releases/v0.6.1-1.md) · [Changelog](CHANGELOG.md)
 
 In bug reports, use made-up text. **Do not send passwords, recordings or personal typing.**
 
