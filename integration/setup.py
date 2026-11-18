@@ -796,7 +796,8 @@ def main():
                'disable': 'OpenSwipe disabled; settings still owned by setup were restored.'}[args.action])
     except (SetupError, OSError) as error:
         print('OpenSwipe: ' + str(error), file=sys.stderr)
-        print('Help: https://github.com/itsdestin/openswipe#troubleshooting\n'
+        # WHY #help (issue #27 follow-up): the README has no Troubleshooting section; this link led nowhere.
+        print('Help: https://github.com/itsdestin/openswipe#help\n'
               'Share the error and versions, not typing recordings or private logs. '
               'Do not force dependencies or overwrite custom layouts.', file=sys.stderr)
         return 1
